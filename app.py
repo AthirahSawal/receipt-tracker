@@ -12,7 +12,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 # Replace with your real OCR.Space API key
-OCR_API_KEY = 'helloworld'  # ← Replace this with your key from ocr.space
+OCR_API_KEY = 'K86832598988957'  # ← Replace this with your key from ocr.space
 
 class Receipt(db.Model):
     id = db.Column(db.Integer, primary_key=True)

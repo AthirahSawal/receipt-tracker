@@ -1,18 +1,27 @@
-from flask import Flask, render_template, request, redirect, url_for
 import os
 import re
 import requests
-from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+from flask import Flask, render_template, request, redirect, url_for
+from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///receipts.db'
+
+# Create uploads folder if not exists
+UPLOAD_FOLDER = 'uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Use writable path for SQLite DB on Render
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:////tmp/receipts.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
 db = SQLAlchemy(app)
 
-# 🔑 Replace with your actual OCR.Space API key
-OCR_API_KEY = 'K86832598988957'
+# Read OCR API key from environment variable
+OCR_API_KEY = os.getenv('OCR_API_KEY')
+if not OCR_API_KEY:
+    raise ValueError("OCR_API_KEY environment variable not set")
 
 # Receipt model
 class Receipt(db.Model):
@@ -30,7 +39,7 @@ with app.app_context():
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
-        file = request.files['image']
+        file = request.files.get('image')
         if file:
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
             file.save(filepath)
@@ -39,7 +48,7 @@ def index():
                 with open(filepath, 'rb') as f:
                     response = requests.post(
                         'https://api.ocr.space/parse/image',
-                        files={'filename': f},
+                        files={'file': f},  # fixed key here
                         data={'apikey': OCR_API_KEY, 'language': 'eng', 'isTable': True}
                     )
                 result = response.json()
@@ -50,18 +59,18 @@ def index():
 
             lines = [line.strip() for line in parsed_text.split('\n') if line.strip()]
 
-            # Shop name
+            # Shop name detection
             shop_name = "Not found"
             for line in lines[:5]:
                 if len(line.split()) >= 2:
                     shop_name = line
                     break
 
-            # Date
+            # Date detection
             date_match = re.search(r'(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}[/-]\d{2}[/-]\d{2})', parsed_text)
             date = date_match.group(0) if date_match else "Not found"
 
-            # Items (skip cash, total etc.)
+            # Extract items ignoring totals, cash etc.
             ignore_keywords = ['total', 'change', 'cash', 'balance', 'payment']
             items = []
             for line in lines:

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Add Receipt Manually</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    form { max-width: 400px; }
+    label { display: block; margin-top: 15px; }
+    input[type="text"], input[type="number"] { width: 100%; padding: 8px; }
+    button { margin-top: 20px; padding: 8px 12px; background-color: #4CAF50; color: white; border: none; }
+  </style>
+</head>
+<body>
+  <h1>Add Receipt Item Manually</h1>
+  <form method="POST">
+    <label>Shop Name</label>
+    <input type="text" name="shop" required>
+
+    <label>Date (e.g. 12/06/2025)</label>
+    <input type="text" name="date" required>
+
+    <label>Item</label>
+    <input type="text" name="item" required>
+
+    <label>Quantity</label>
+    <input type="number" name="quantity" min="1" value="1" required>
+
+    <label>Price</label>
+    <input type="text" name="price" required>
+
+    <button type="submit">Add Entry</button>
+  </form>
+</body>
+</html>

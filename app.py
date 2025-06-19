@@ -1,29 +1,30 @@
 from flask import Flask, render_template, request, redirect, url_for
-from flask_sqlalchemy import SQLAlchemy
-from PIL import Image
-import pytesseract
 import os
 import re
+import requests
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
 
 app = Flask(__name__)
-UPLOAD_FOLDER = 'uploads'
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///receipts.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
 db = SQLAlchemy(app)
 
-# Tesseract path
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Replace with your real OCR.Space API key
+OCR_API_KEY = 'helloworld'  # ← Replace this with your key from ocr.space
 
-# Database model
-class ReceiptItem(db.Model):
+class Receipt(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    shop = db.Column(db.String(100))
+    shop_name = db.Column(db.String(100))
     date = db.Column(db.String(20))
-    item = db.Column(db.String(100))
+    item = db.Column(db.String(200))
     price = db.Column(db.String(20))
-    quantity = db.Column(db.Integer, default=1)
+    quantity = db.Column(db.Integer)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+with app.app_context():
+    db.create_all()
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -33,79 +34,74 @@ def index():
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
             file.save(filepath)
 
-            img = Image.open(filepath)
-            text = pytesseract.image_to_string(img)
-            lines = [line.strip() for line in text.split('\n') if line.strip()]
+            # Upload to OCR.Space
+            with open(filepath, 'rb') as f:
+                response = requests.post(
+                    'https://api.ocr.space/parse/image',
+                    files={'filename': f},
+                    data={
+                        'apikey': OCR_API_KEY,
+                        'language': 'eng',
+                        'isTable': True
+                    }
+                )
+            result = response.json()
+            parsed_text = result['ParsedResults'][0]['ParsedText']
+
+            # Process the text
+            lines = [line.strip() for line in parsed_text.split('\n') if line.strip()]
 
             # Shop name
             shop_name = "Not found"
-            for line in lines[:10]:
-                clean_line = re.sub(r'[^A-Za-z0-9\s&]', '', line)
-                if len(clean_line.split()) >= 2 and len(clean_line) >= 5:
-                    shop_name = clean_line.strip()
+            for line in lines[:5]:
+                if len(line.split()) >= 2:
+                    shop_name = line
                     break
 
             # Date
-            date_match = re.search(r'(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}[/-]\d{2}[/-]\d{2})', text)
+            date_match = re.search(r'(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}[/-]\d{2}[/-]\d{2})', parsed_text)
             date = date_match.group(0) if date_match else "Not found"
 
-            ignore_keywords = ['cash', 'change', 'total', 'subtotal', 'payment', 'balance', 'tax']
+            # Item lines
+            ignore_keywords = ['total', 'change', 'cash', 'balance', 'payment']
+            items = []
             for line in lines:
-                lower_line = line.lower()
-                if any(keyword in lower_line for keyword in ignore_keywords):
-                    continue
+                if re.search(r'\d+\.\d{2}', line):
+                    if not any(k in line.lower() for k in ignore_keywords):
+                        match = re.search(r'(.+?)\s+(\d+\.\d{2})$', line)
+                        if match:
+                            item_name = match.group(1).strip()
+                            price = match.group(2)
+                            items.append((item_name, price))
 
-                match = re.match(r'(.+?)\s+(\d+\.\d{2})$', line)
-                if match:
-                    item_name = match.group(1).strip()
-                    price = match.group(2)
-                    new_item = ReceiptItem(shop=shop_name, date=date, item=item_name, price=price, quantity=1)
-                    db.session.add(new_item)
-
+            # Save to DB
+            for name, price in items:
+                r = Receipt(shop_name=shop_name, date=date, item=name, price=price, quantity=1)
+                db.session.add(r)
             db.session.commit()
-            return redirect('/')
+            return redirect(url_for('index'))
 
-    all_items = ReceiptItem.query.order_by(ReceiptItem.id.desc()).all()
-    return render_template('index.html', items=all_items)
+    receipts = Receipt.query.order_by(Receipt.timestamp.desc()).all()
+    return render_template('index.html', receipts=receipts)
 
-@app.route('/delete/<int:item_id>', methods=['POST'])
-def delete_item(item_id):
-    item = ReceiptItem.query.get_or_404(item_id)
-    db.session.delete(item)
+@app.route('/delete/<int:id>')
+def delete(id):
+    r = Receipt.query.get_or_404(id)
+    db.session.delete(r)
     db.session.commit()
-    return redirect('/')
-
-@app.route('/edit/<int:item_id>', methods=['GET', 'POST'])
-def edit_item(item_id):
-    item = ReceiptItem.query.get_or_404(item_id)
-    if request.method == 'POST':
-        item.shop = request.form['shop']
-        item.date = request.form['date']
-        item.item = request.form['item']
-        item.price = request.form['price']
-        item.quantity = request.form['quantity']
-        db.session.commit()
-        return redirect('/')
-    return render_template('edit.html', item=item)
+    return redirect(url_for('index'))
 
 @app.route('/add', methods=['GET', 'POST'])
-def add_manual():
+def add():
     if request.method == 'POST':
-        shop = request.form['shop']
-        date = request.form['date']
-        item = request.form['item']
-        price = request.form['price']
-        quantity = request.form.get('quantity', 1)
-
-        new_item = ReceiptItem(shop=shop, date=date, item=item, price=price, quantity=quantity)
-        db.session.add(new_item)
+        r = Receipt(
+            shop_name=request.form['shop_name'],
+            date=request.form['date'],
+            item=request.form['item'],
+            price=request.form['price'],
+            quantity=request.form.get('quantity', 1)
+        )
+        db.session.add(r)
         db.session.commit()
-        return redirect('/')
+        return redirect(url_for('index'))
     return render_template('add.html')
-
-if __name__ == '__main__':
-    if not os.path.exists('uploads'):
-        os.makedirs('uploads')
-    with app.app_context():
-        db.create_all()
-    app.run(debug=True)

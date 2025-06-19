@@ -11,10 +11,10 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///receipts.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# 🔑 Replace this with your actual OCR.Space API key
-OCR_API_KEY = 'K86832598988957'  # e.g. 'helloworld'
+# 🔑 Replace with your actual OCR.Space API key
+OCR_API_KEY = 'K86832598988957'
 
-# Database model
+# Receipt model
 class Receipt(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     shop_name = db.Column(db.String(100))
@@ -50,18 +50,18 @@ def index():
 
             lines = [line.strip() for line in parsed_text.split('\n') if line.strip()]
 
-            # Extract shop name
+            # Shop name
             shop_name = "Not found"
             for line in lines[:5]:
                 if len(line.split()) >= 2:
                     shop_name = line
                     break
 
-            # Extract date
+            # Date
             date_match = re.search(r'(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}[/-]\d{2}[/-]\d{2})', parsed_text)
             date = date_match.group(0) if date_match else "Not found"
 
-            # Extract items
+            # Items (skip cash, total etc.)
             ignore_keywords = ['total', 'change', 'cash', 'balance', 'payment']
             items = []
             for line in lines:
@@ -73,22 +73,16 @@ def index():
                             price = match.group(2)
                             items.append((item_name, price))
 
-            # Save to database
+            # Save to DB
             for item_name, price in items:
                 r = Receipt(shop_name=shop_name, date=date, item=item_name, price=price, quantity=1)
                 db.session.add(r)
             db.session.commit()
+
             return redirect(url_for('index'))
 
     receipts = Receipt.query.order_by(Receipt.timestamp.desc()).all()
     return render_template('index.html', receipts=receipts)
-
-@app.route('/delete/<int:id>')
-def delete(id):
-    r = Receipt.query.get_or_404(id)
-    db.session.delete(r)
-    db.session.commit()
-    return redirect(url_for('index'))
 
 @app.route('/add', methods=['GET', 'POST'])
 def add():
@@ -104,3 +98,10 @@ def add():
         db.session.commit()
         return redirect(url_for('index'))
     return render_template('add.html')
+
+@app.route('/delete/<int:id>')
+def delete(id):
+    r = Receipt.query.get_or_404(id)
+    db.session.delete(r)
+    db.session.commit()
+    return redirect(url_for('index'))

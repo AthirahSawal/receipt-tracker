@@ -1,4 +1,5 @@
-flask
-requests
-flask_sqlalchemy
+Flask
+Flask-SQLAlchemy
+pytesseract
+Pillow
 gunicorn
